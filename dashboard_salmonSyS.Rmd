@@ -1,0 +1,316 @@
+---
+title: "SalmonsSYS - mortality"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(here)
+library(dplyr)
+library(plotly)
+library(tmap)
+library(leaflet)
+library(dygraphs)
+library(xts)
+
+Sys.setlocale("LC_TIME", "C")
+
+#Main Datasets (df_noExc, dfanalysis, loc_reg) 
+source(here("scripts", "data_salmonSyS.r"), encoding = "UTF-8")
+
+#active_farms <- nrow(df_noExc %>% filter(date == max(date)) %>% dplyr::select(location))
+active_farms <- nrow(df_noExc %>% filter(date == "2020-12-01", mnd.count > 2) %>% dplyr::select(location))
+
+max_farms <- length(unique(df_noExc$location))
+
+# Palletes map tab1 
+group_map_palette <- c("Baseline mortality < 2%"="#3182bd", "High mortality > 2%" = "#de2d26",
+                      "Innacurate counts (exclusion)" = "#636363", 
+                      "Weight upon stocking at sea > 500g (exclusion)" = "#bdbdbd")
+
+# Palletes for map tab 2
+consec_innac_palette <- c("1"= "#f0f0f0", "2" = "#bdbdbd", "3" = "#636363")
+
+consec_high_mort_palette <- c("1"="#fee0d2", "2" = "#fc9272", "3" = "#de2d26")
+
+# Color map tab 3
+# Palletes map tab1 
+bas_mort_palette <- c("Baseline mortality < 2%"="#3182bd")
+
+# To hide labels in plots tab 2
+ax <- list(
+  title = "",
+  zeroline = FALSE,
+  showline = FALSE,
+  showticklabels = FALSE,
+  showgrid = FALSE
+)
+
+```
+
+Data overview
+===================================== 
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Latest update
+
+```{r}
+#latest_update <- format(as.Date(Sys.Date()), "%B, %Y")
+latest_update <- format(as.Date("2020-12-31"), "%B, %Y")
+valueBox(latest_update, icon = "ion-calendar")
+```
+
+### Number of active farms stocked for 3 months or more at sea
+
+```{r}
+gauge(active_farms, min = 0, max = max_farms 
+      #gaugeSectors( # possible to change the color according to numbers
+  #success = c(0, round(0.33*max_farms,0)), 
+  #warning = c(round(0.33*max_farms,0) + 1, round(0.66*max_farms,0)),
+  #danger = c(round(0.66*max_farms,0), max_farms)
+)
+
+```
+
+### Farms per groups
+
+```{r}
+df_noExc %>% 
+  #dplyr::filter(date == max(date)) %>%
+  dplyr::filter(mnd.count > 2, date == "2020-12-01") %>% 
+  count(group) %>%
+  plot_ly(type = "bar", 
+          x = ~group, 
+          y = ~n, 
+          color = ~group,
+          marker = list(color = c("#3182bd", "#de2d26",
+                                 "#636363", "#bdbdbd"))) %>%
+  layout(xaxis= list(showticklabels = FALSE))
+```
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Geographical location
+
+```{r}
+tmap_mode("view") #interactive other option is 'plot' which is static
+current_view = tm_view(bbox = sf::st_bbox(group_map), set.zoom.limits = c(1, 15))
+
+map = 
+  tm_shape(Zones) + 
+  tm_borders() + 
+  tm_shape(group_map) + #tm_shape adds a layer 
+  tm_dots (title = "Group",
+           size = 0.15,
+           col = "group",
+           palette = group_map_palette,
+           popup.vars = c("Group" = "group"),
+           alpha = 0.9)
+map
+```
+
+
+Non-baseline figures 
+===================================== 
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+    
+### Consecutive months with high mortality
+    
+```{r}
+plot_ly(consec_high_mort %>%
+          #filter(date == max(date)) %>%
+          filter(date == "2020-12-01") %>%
+          group_by(n_cat) %>%
+          summarize(n = n(), .groups = "drop") %>%
+          filter(n_cat != "0") %>%
+          mutate(total = sum(n), prop = (n/total)*100, cat = "n") %>%
+          ungroup(),
+        x = ~cat, y = ~n, type = "bar", color = ~n_cat, colors = "Reds") %>%
+  layout(xaxis = list(title = 'n'), barmode = "stack") %>%
+  layout(xaxis = ax) %>%
+  layout(annotations= list(yref='paper',xref="paper",y=1.05,x=1.1, text="Alert level", showarrow=F))
+```
+   
+### Consecutive months with innacurate counts
+
+```{r}
+plot_ly(consec_innac %>%
+          #filter(date == max(date)) %>%
+          filter(date == "2020-12-01") %>%
+          group_by(n_cat) %>%
+          summarize(n = n(), .groups = "drop") %>%
+          filter(n_cat != "0") %>%
+          mutate(total = sum(n), prop = (n/total)*100, cat = "Innacurate counts") %>%
+          ungroup(),
+        x = ~cat, y = ~n, type = "bar", color = ~n_cat, colors = "Greys") %>%
+  layout(xaxis = list(title = 'n'), barmode = "stack") %>%
+  layout(xaxis = ax) %>%
+  layout(annotations= list(yref='paper',xref="paper",y=1.05,x=1.1, text="Alert level", showarrow=F))
+```   
+
+Column {data-width=650}
+-------------------------------------
+
+### Monitoring of NON-BASELINE mortality in active farms and its determinants
+    
+```{r}
+tmap_mode("view") #interactive other option is 'plot' which is static
+current_view = tm_view(bbox = sf::st_bbox(consec_innac_map), set.zoom.limits = c(1, 15))
+
+map = 
+  tm_shape(Zones) + 
+  tm_borders() + 
+  
+  tm_shape(consec_innac_map) + 
+  tm_dots (title = "Alert level innacurate counts",
+           size = 0.15,
+           col = "n_cat",
+           palette = consec_innac_palette,
+           popup.vars = c("Alert level" = "n_cat",
+                          "Mortality(deaths/1,000)" = "mort",
+                          "Stocking month" = "start.mnd",
+                          "Production month" = "mnd.count",
+                          "SL med. treat." = "bade.treat",
+                          "SL non-med. treat." = "mekanisk.treat",
+                          "SL infestation (avg/mth)" = "lus.count",
+                          "PD status" = "pd.cohort",
+                          "ILA status" = "ila.cohort"),
+           alpha = 0.9) +
+  
+  tm_shape(consec_high_mort_map) + 
+  tm_dots (title = "Alert level high mortality",
+           size = 0.15,
+           col = "n_cat",
+           palette = consec_high_mort_palette,
+           popup.vars = c("Alert level" = "n_cat",
+                          "Mortality(deaths/1,000)" = "mort",
+                          "Stocking month" = "start.mnd",
+                          "Production month" = "mnd.count",
+                          "SL med. treat." = "bade.treat",
+                          "SL non-med. treat." = "mekanisk.treat",
+                          "SL infestation (avg/mth)" = "lus.count",
+                          "PD status" = "pd.cohort",
+                          "ILA status" = "ila.cohort"),
+           alpha = 0.9)
+  
+map %>% tmap_leaflet() %>%
+  leaflet::hideGroup("consec_innac_map")
+```
+
+Baseline figures
+===================================== 
+
+Column {data-width=350}
+-------------------------------------
+
+### Baseline mortality history - Norway
+
+```{r}
+dygraph(med_iqr_mort_no, main = "Median mortality and IQR") %>%
+  dySeries(c("V1", "V2", "V3"), label = "Mortality") %>%
+  dyAxis("y", label = "Monthly deaths per 1,000 fish") %>%
+  dyOptions(colors = "#3182bd") %>%
+  dyRangeSelector(height = 20, strokeColor = "")
+```
+
+### Baseline mortality history - Norway VS Zones 
+
+```{r}
+dygraph(med_mort_no_z1, main = "Median mortality") %>%
+  dySeries("V1", label = "Norway", color = "#3182bd") %>%
+  dySeries("V2", label = "Zone 1", color = "#52854C") %>% 
+  dyAxis("y", label = "Monthly deaths per 1,000 fish") %>%
+  dyRangeSelector(height = 20, strokeColor = "")
+
+# A tab for each zone would be useful or a shiny app may solve that issue? It seems flexdashboard does
+# not support tabs if not for the entire row or column
+# Maybe it is possible with plotly (selection of lines displayed), but the range selector would be
+# different, see https://plotly.com/r/range-slider/ 
+```   
+
+Column {data-width=650}
+-------------------------------------
+
+### Monitoring of BASELINE mortality in active farms and its determinants
+
+```{r}
+tmap_mode("view") #interactive other option is 'plot' which is static
+
+current_view = tm_view(bbox = sf::st_bbox(consec_innac_map), set.zoom.limits = c(1, 15))
+
+map = 
+  tm_shape(Zones) + 
+  tm_borders() + 
+  tm_shape(bas_mort_map) + #tm_shape adds a layer 
+  tm_dots (title = "Group",
+           size = 0.15,
+           col = "group",
+           palette = bas_mort_palette,
+           popup.vars = c("Mortality(deaths/1,000)" = "mort",
+                          "Stocking month" = "start.mnd",
+                          "Production month" = "mnd.count",
+                          "SL med. treat." = "bade.treat",
+                          "SL non-med. treat." = "mekanisk.treat",
+                          "SL infestation (avg/mth)" = "lus.count",
+                          "PD status" = "pd.cohort",
+                          "ILA status" = "ila.cohort"),
+           alpha = 0.9)
+map
+```
+
+Observed VS expected {data-orientation=rows}
+===================================== 
+
+Row  {data-height=400}
+-----------------------------------------------------------------------
+
+### Holt-Winters forecasting for Norway
+
+```{r}
+dygraph(ts_no, "Mortality Norway") %>%
+  dySeries("ts_no", label = "Observed", color = "#3182bd") %>%
+  dySeries("ts_hs", label = "Holt-winters", color = "#C4961A") %>%
+  dySeries(c("p_hw.lwr", "p_hw.fit", "p_hw.upr"), label = "Predicted", color = "#FFDB6D") %>%
+  dyAxis("y", label = "Monthly deaths per 1,000 fish") %>%
+  dyRangeSelector(height = 20, strokeColor = "")
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### Model 1b forecasting for currently active farm
+
+```{r}
+dygraph(farm_x_m1b, main = "Mortality farm X (m1b)") %>%
+  dySeries("V1", label = "Upper limit", fillGraph = TRUE, color = "#FFDB6D") %>%
+  dyOptions(fillAlpha = 0.1) %>%
+  dySeries("V2", label = "Observed", color = "#3182bd") %>%
+  dySeries("V3", label = "Expected", color = "#C4961A") %>%
+  dyAxis("y", label = "Total deaths") %>%
+  dyRangeSelector(height = 20, strokeColor = "")
+```
+
+### Model 2 forecasting for currently active farm
+
+```{r}
+dygraph(farm_x_m2, main = "Mortality Farm X (m2)") %>%
+  dySeries("V1", label = "Upper limit", fillGraph = TRUE, color = "#FFDB6D") %>%
+  dyOptions(fillAlpha = 0.1) %>%
+  dySeries("V2", label = "Observed", color = "#3182bd") %>%
+  dySeries("V3", label = "Expected", color = "#C4961A") %>%
+  dyAxis("y", label = "Total deaths") %>%
+  dyRangeSelector(height = 20, strokeColor = "")
+```
+
+
+
