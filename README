@@ -4,7 +4,8 @@ This code was developed as a prototype to explore concepts for a potential morta
 Active development was paused.
 
 The script 'data_salmonSyS.r' is not included due to data confidentiality.
-It was responsible for preparing key datasets used in the dashboard (e.g., df_noExc, consec_innac_map).
+A example dataset has been created with variables that appear in data_salmon_SyS, 
+see data_dashboard_Salmon_SyS_demo.R for running dashboard_Salmon_SyS_demo.R 
 
 This work has received funding from the European Union’s
 Horizon 2020 Research and Innovation Programme under
